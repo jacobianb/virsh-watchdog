@@ -1,0 +1,38 @@
+#!/bin/bash
+out=$(curl -s -o /dev/null -w "%{http_code}" https://www.google.com)
+string=$(virsh dominfo win10 | grep State)
+
+if [ $out -eq 200 ]; then
+	if [[ $string == *"running"* ]]; then
+		echo "VM is already running."
+	else
+		virsh start win10
+		echo "Internet connectivity established. Starting VM..." > /root/VMLog
+
+	fi
+fi
+
+out=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.11.11)
+if [ $out -ne 0 ]; then
+        echo "VM is still running."
+	if [ -f /root/VMFailCount ]; then
+		rm -rf /root/VMFailCount
+	fi
+else
+	if [ ! -f /root/VMFailCount ]; then
+		FAIL_COUNT='1'
+	else
+		FAIL_COUNT=`cat /root/VMFailCount`
+		FAIL_COUNT=`expr $FAIL_COUNT + 1`
+	fi
+	echo "$FAIL_COUNT" > /root/VMFailCount
+	if [ "$FAIL_COUNT" -gt "5" ]; then
+		virsh shutdown win10
+		echo "VM has been unresponsive for 5 minutes. Attempting soft shutdown." > /root/VMLog
+	fi
+	if [ "$FAIL_COUNT" -gt "10" ]; then
+		virsh destroy win10
+		echo "VM has been unresponsive for 10 minutes. Forcing hard shutdown." > /root/VMLog
+	fi
+fi
+
