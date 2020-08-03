@@ -1,24 +1,33 @@
 #!/bin/bash
-out=$(curl -s -o /dev/null -w "%{http_code}" https://www.google.com)
+out=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.11.1)
 string=$(virsh dominfo win10 | grep State)
+dt=$(date)
+FAIL_COUNT=-999
 
+#Check if router is reachable before booting the virtual machine
 if [ $out -eq 200 ]; then
 	if [[ $string == *"running"* ]]; then
-		echo "VM is already running."
+		echo "[$dt] VM is running."
 	else
 		virsh start win10
-		echo "Internet connectivity established. Starting VM..." > /root/VMLog
+		FAIL_COUNT='-4' # This will become -3 from logic below, giving us 3 extra minutes for the VM to boot.
+        	echo "$FAIL_COUNT" > /root/VMFailCount
+		echo "[$dt] Router connectivity established. Starting VM..." >> /root/VMLog
 
-	fi
-fi
-
-out=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.11.11)
-if [ $out -ne 0 ]; then
-        echo "VM is still running."
-	if [ -f /root/VMFailCount ]; then
-		rm -rf /root/VMFailCount
 	fi
 else
+	exit 0
+fi
+
+#Check if emby is reachable within the virtual machine
+out=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.11.11)
+if [ $out -ne 0 ]; then
+        echo "[$dt] Emby is running."
+	if [ -f /root/VMFailCount ]; then
+		echo "[$dt] Emby is now operational." >> /root/VMLog
+		rm -rf /root/VMFailCount
+	fi
+else #if it isn't reachable...
 	if [ ! -f /root/VMFailCount ]; then
 		FAIL_COUNT='1'
 	else
@@ -26,13 +35,15 @@ else
 		FAIL_COUNT=`expr $FAIL_COUNT + 1`
 	fi
 	echo "$FAIL_COUNT" > /root/VMFailCount
-	if [ "$FAIL_COUNT" -gt "5" ]; then
+	if [ "$FAIL_COUNT" -gt "3" ]; then
 		virsh shutdown win10
-		echo "VM has been unresponsive for 5 minutes. Attempting soft shutdown." > /root/VMLog
+		echo "[$dt] VM has been unresponsive for 4 minutes. Attempting soft shutdown." >> /root/VMLog
 	fi
-	if [ "$FAIL_COUNT" -gt "10" ]; then
+	if [ "$FAIL_COUNT" -gt "4" ]; then
 		virsh destroy win10
-		echo "VM has been unresponsive for 10 minutes. Forcing hard shutdown." > /root/VMLog
+		echo "[$dt] VM has been unresponsive for 5 minutes. Forcing hard shutdown." >> /root/VMLog
 	fi
 fi
-
+if [ $FAIL_COUNT -ne -999 ]; then
+	echo "[$dt] FAIL_COUNT = $FAIL_COUNT" >> /root/VMLog
+fi
